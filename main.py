@@ -5,16 +5,20 @@ import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.error import BadRequest
+from dotenv import load_dotenv
 
 # Bot Token from BotFather
-TOKEN = '7910588215:AAHK8Wy-6ksqG2gxdESfafxQm6wTJhebfb0'
-ADMIN_ID = 5061909214  # Replace with your Telegram user ID
-CHANNEL_ID = -1002377930857  # The channel where movies are posted
-DB_NAME = "movies"
-DB_USER = "postgres"
-DB_PASSWORD = "1"
-DB_HOST = "localhost"  # Yoki server manzili
-DB_PORT = "5432"
+load_dotenv()
+
+# O'zgaruvchilarni olish
+TOKEN = os.getenv("TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
 
 
 # PostgreSQL bilan bog'lanish uchun funksiya
