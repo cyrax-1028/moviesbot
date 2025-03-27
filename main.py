@@ -71,36 +71,82 @@ async def save_message_store(message_store):
 
 
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id == ADMIN_ID:
-        channel_url = context.args[0] if context.args else None
-        if channel_url and channel_url.startswith("https://t.me/"):
-            channel_username = channel_url.split("/")[-1]
-
-            # PostgreSQL bazaga yozish
-            conn = await connect_db()
-            existing_channel = await conn.fetchval("SELECT channel_username FROM channels WHERE channel_username = $1",
-                                                   channel_username)
-
-            if existing_channel:
-                await update.message.reply_text("Kanal allaqachon ro'yxatda mavjud.")
-            else:
-                await conn.execute("INSERT INTO channels (channel_username) VALUES ($1)", channel_username)
-                await update.message.reply_text(f"Kanal qo'shildi: @{channel_username}")
-
-            await conn.close()
-        else:
-            await update.message.reply_text(
-                "Iltimos, to'g'ri kanal URL'sini kiritishingiz kerak (masalan: https://t.me/kanal_nomi)."
-            )
-    else:
+    """Kanal qo'shish funksiyasi"""
+    if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("Sizda kanal qo'shish huquqi yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Iltimos, kanal URL'sini kiriting. Masalan: /addchannel https://t.me/kanal_nomi")
+        return
+
+    channel_url = context.args[0]
+
+    if not channel_url.startswith("https://t.me/"):
+        await update.message.reply_text(
+            "Iltimos, kanal URL'sini `https://t.me/` bilan kiriting. Masalan: /addchannel https://t.me/kanal_nomi")
+        return
+
+    channel_username = channel_url.split("/")[-1]  # URL'dan username ajratib olish
+
+    conn = await connect_db()
+    if not conn:
+        await update.message.reply_text("Baza bilan bog'lanishda muammo yuz berdi.")
+        return
+
+    existing_channel = await conn.fetchval(
+        "SELECT channel_username FROM channels WHERE channel_username = $1", channel_username
+    )
+
+    if existing_channel:
+        await update.message.reply_text("Kanal allaqachon ro'yxatda mavjud.")
+    else:
+        await conn.execute("INSERT INTO channels (channel_username) VALUES ($1)", channel_username)
+        await update.message.reply_text(f"Kanal qo'shildi: {channel_url}")
+
+    await conn.close()
+
+
+async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kanalni o‘chirish funksiyasi"""
+    if update.message.from_user.id != ADMIN_ID:
+        await update.message.reply_text("Sizda kanal olib tashlash huquqi yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Iltimos, o‘chirish uchun kanal URL'sini kiriting. Masalan: /removechannel https://t.me/kanal_nomi")
+        return
+
+    channel_url = context.args[0]
+
+    if not channel_url.startswith("https://t.me/"):
+        await update.message.reply_text(
+            "Iltimos, kanal URL'sini `https://t.me/` bilan kiriting. Masalan: /removechannel https://t.me/kanal_nomi")
+        return
+
+    channel_username = channel_url.split("/")[-1]  # URL'dan username ajratib olish
+
+    conn = await connect_db()
+    if not conn:
+        await update.message.reply_text("Baza bilan bog'lanishda muammo yuz berdi.")
+        return
+
+    result = await conn.execute("DELETE FROM channels WHERE channel_username = $1", channel_username)
+    await conn.close()
+
+    if result == "DELETE 1":
+        await update.message.reply_text(f"Kanal olib tashlandi: {channel_url}")
+    else:
+        await update.message.reply_text("Bu kanal ro‘yxatda mavjud emas.")
 
 
 # Barcha kanallarni yuklash
 async def load_channels():
     conn = await connect_db()
     rows = await conn.fetch("SELECT channel_username FROM channels")
-    channels = [f"@{row['channel_username']}" for row in rows]
+    channels = [f"https://t.me/{row['channel_username']}" for row in rows]  # URL sifatida qaytarish
     await conn.close()
     return channels
 
@@ -110,7 +156,7 @@ async def get_channels():
     conn = await connect_db()
     rows = await conn.fetch("SELECT channel_username FROM channels")
     await conn.close()
-    return [f"@{row['channel_username']}" for row in rows]
+    return [row['channel_username'] for row in rows]
 
 
 async def check_subscription(user_id, bot):
@@ -119,11 +165,11 @@ async def check_subscription(user_id, bot):
 
     for channel in channels:
         try:
-            chat_member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            chat_member = await bot.get_chat_member(chat_id=f"@{channel}", user_id=user_id)
             if chat_member.status not in ['member', 'administrator', 'creator']:
                 return False
-        except BadRequest:
-            logging.warning(f"Kanal {channel} topilmadi yoki boshqa xatolik yuz berdi.")
+        except Exception as e:
+            logging.warning(f"Kanal {channel} tekshirilganda xatolik: {e}")
             return False
     return True
 
@@ -322,29 +368,6 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Barcha foydalanuvchilar:\n{user_list}")
     else:
         await update.message.reply_text("Sizda bu buyruqni ishlatish huquqi yo'q.")
-
-
-async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id == ADMIN_ID:
-        channel_url = context.args[0] if context.args else None
-
-        if not channel_url or not channel_url.startswith("https://t.me/"):
-            await update.message.reply_text(
-                "Iltimos, to‘g‘ri kanal URL'sini kiriting (masalan: https://t.me/kanal_nomi).")
-            return
-
-        channel_username = channel_url.split("/")[-1]
-
-        conn = await connect_db()
-        result = await conn.execute("DELETE FROM channels WHERE channel_username = $1", channel_username)
-        await conn.close()
-
-        if result == "DELETE 1":
-            await update.message.reply_text(f"Kanal olib tashlandi: @{channel_username}")
-        else:
-            await update.message.reply_text("Bu kanal ro‘yxatda mavjud emas.")
-    else:
-        await update.message.reply_text("Sizda kanal olib tashlash huquqi yo‘q.")
 
 
 async def channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
