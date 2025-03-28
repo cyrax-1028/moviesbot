@@ -160,18 +160,18 @@ async def get_channels():
 
 
 async def check_subscription(user_id, bot):
-    """Foydalanuvchini barcha kanallarga a’zo ekanligini tekshiradi"""
     channels = await get_channels()  # Bazadan kanallarni olish
 
-    for channel in channels:
+    async def check_channel(channel):
         try:
-            chat_member = await bot.get_chat_member(chat_id=f"@{channel}", user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                return False
-        except Exception as e:
-            logging.warning(f"Kanal {channel} tekshirilganda xatolik: {e}")
+            chat_member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            return chat_member.status in ['member', 'administrator', 'creator']
+        except BadRequest:
             return False
-    return True
+
+    results = await asyncio.gather(*(check_channel(channel) for channel in channels))
+
+    return all(results)  # Agar foydalanuvchi barcha kanallarga a'zo bo'lsa True qaytaradi
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -268,18 +268,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     username = update.message.from_user.username
 
-    conn = await connect_db()
+    async with pool.acquire() as conn:  # Pool orqali bog‘lanish
+        # Foydalanuvchi bazada bor-yo‘qligini tekshirish
+        user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", user_id)
 
-    # Foydalanuvchi bazada bor-yo‘qligini tekshirish
-    user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", user_id)
-
-    if not user_exists:
-        # Yangi foydalanuvchini qo‘shish
-        await conn.execute(
-            "INSERT INTO users (user_id, data) VALUES ($1, $2)",
-            user_id,
-            json.dumps({"username": username, "first_name": user_name})  # `dict`ni JSON formatga o‘tkazish
-        )
+        if not user_exists:
+            # Yangi foydalanuvchini qo‘shish
+            await conn.execute(
+                "INSERT INTO users (user_id, data) VALUES ($1, $2)",
+                user_id,
+                json.dumps({"username": username, "first_name": user_name})
+            )
 
     # Obunani tekshirish
     is_subscribed = await check_subscription(user_id, context.bot)
@@ -287,8 +286,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Xush kelibsiz, {user_name}! Marhamat, menga film kodini yuboring.")
     else:
         await send_subscription_prompt(update.effective_chat.id, context)
-
-    await conn.close()
 
 
 # Kanal postini qayta ishlash va bazaga saqlash
